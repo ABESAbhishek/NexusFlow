@@ -45,10 +45,26 @@ const initialEdges = [
   { id: "e-filter-alert", source: "filter-1", target: "alert-1", animated: true }
 ];
 
+const GRAPH_STORAGE_KEY = "nexusflow-week1-graph";
+type SavedGraph = { nodes: Node[]; edges: typeof initialEdges; savedAt?: string };
+
+function readSavedGraph(): SavedGraph | null {
+  try {
+    const raw = localStorage.getItem(GRAPH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SavedGraph;
+    if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 function Studio() {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const [saved, setSaved] = useState(false);
+  const restoredGraph = useMemo(() => readSavedGraph(), []);
+  const [nodes, setNodes, onNodesChange] = useNodesState(restoredGraph?.nodes ?? initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(restoredGraph?.edges ?? initialEdges);
+  const [saved, setSaved] = useState(Boolean(restoredGraph));
   const [selected, setSelected] = useState("sensor");
   const onConnect = useCallback((connection: Connection) => setEdges((eds) => addEdge({ ...connection, animated: true }, eds)), [setEdges]);
   const counts = useMemo(() => ({ nodes: nodes.length, connections: edges.length }), [nodes.length, edges.length]);
@@ -66,15 +82,22 @@ function Studio() {
 
   const saveGraph = () => {
     const graph = { nodes, edges, savedAt: new Date().toISOString() };
-    localStorage.setItem("nexusflow-week1-graph", JSON.stringify(graph));
+    localStorage.setItem(GRAPH_STORAGE_KEY, JSON.stringify(graph));
     setSaved(true);
+  };
+
+  const resetGraph = () => {
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+    localStorage.removeItem(GRAPH_STORAGE_KEY);
+    setSaved(false);
   };
 
   return <div className="app-shell">
     <header className="topbar">
       <a className="brand" href="#"><span className="brand-mark"><Workflow size={19} /></span><span>NEXUS<span className="brand-accent">FLOW</span><small>TELEMETRY STUDIO</small></span></a>
       <div className="topbar-center"><span className="live-indicator" /> WORKSPACE <b>/</b> UNTITLED PIPELINE</div>
-      <div className="topbar-actions"><span className="draft-label">WEEK 01 · FOUNDATION</span><button className="save-button" onClick={saveGraph}><Save size={15} /> {saved ? "Saved locally" : "Save graph"}</button></div>
+      <div className="topbar-actions"><span className="draft-label">WEEK 01 · FOUNDATION</span><button className="reset-button" onClick={resetGraph}>Reset starter</button><button className="save-button" onClick={saveGraph}><Save size={15} /> {saved ? "Saved locally" : "Save graph"}</button></div>
     </header>
     <main className="workspace">
       <aside className="sidebar">
@@ -92,7 +115,7 @@ function Studio() {
       <section className="canvas-section">
         <div className="canvas-toolbar"><div><span className="eyebrow">VISUAL WORKFLOW</span><h1>Pipeline canvas</h1></div><div className="canvas-meta"><span><i className="legend-dot cyan-dot" /> SOURCE</span><span><i className="legend-dot violet-dot" /> PROCESS</span><span><i className="legend-dot orange-dot" /> ACTION</span></div></div>
         <div className="flow-wrap">
-          <ReactFlow nodes={nodes} edges={edges} onNodesChange={(changes) => { onNodesChange(changes); setSaved(false); }} onEdgesChange={(changes) => { onEdgesChange(changes); setSaved(false); }} onConnect={onConnect} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.25 }} minZoom={0.25} maxZoom={1.5} proOptions={{ hideAttribution: true }}>
+          <ReactFlow nodes={nodes} edges={edges} deleteKeyCode={["Backspace", "Delete"]} onNodesChange={(changes) => { onNodesChange(changes); setSaved(false); }} onEdgesChange={(changes) => { onEdgesChange(changes); setSaved(false); }} onConnect={onConnect} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.25 }} minZoom={0.25} maxZoom={1.5} proOptions={{ hideAttribution: true }}>
             <Background color="#253244" gap={22} size={1} />
             <Controls />
             <MiniMap nodeColor={(node) => node.type === "sensor" ? "#36c9e8" : node.type === "filter" ? "#9a82f5" : "#f5a45b"} maskColor="rgba(5, 10, 18, 0.72)" />
