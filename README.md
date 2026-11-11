@@ -4,6 +4,8 @@ NexusFlow is a visual IoT pipeline builder for factory telemetry. Week 1 establi
 
 ## Week 1 scope
 - React + TypeScript + Vite frontend with a drag-and-drop React Flow canvas.
+- Starter nodes for sensor input, moving-average processing, and alert actions.
+- Local graph save/restore, starter-graph reset, node deletion, and responsive workspace layout.
 - Express + TypeScript backend with health, single-event, batch-ingestion, and recent-telemetry endpoints.
 - MongoDB native time-series collection (telemetry) with timestamp as the time field and metadata as the metadata field.
 - Environment-based configuration, request validation, bounded batch size, and graceful server shutdown.
@@ -24,6 +26,15 @@ NexusFlow is a visual IoT pipeline builder for factory telemetry. Week 1 establi
 - Frontend: http://localhost:5173
 - API: http://localhost:3001
 - Health: http://localhost:3001/api/health
+
+## Frontend workflow
+- Add sensor, processing, and action nodes from the node library.
+- Drag nodes and connect compatible ports to shape a telemetry pipeline.
+- Select a node and press Backspace or Delete to remove it.
+- Use **Save graph** to store the current canvas in browser local storage; saved graphs are restored on the next visit in the same browser.
+- Use **Reset starter** to return to the initial example pipeline and clear the saved draft.
+
+The graph editor is currently a visual foundation. Saving a graph stores its layout locally; it does not yet compile or execute telemetry rules against the backend.
 
 ## API
 - GET /api/health — service and database status.
