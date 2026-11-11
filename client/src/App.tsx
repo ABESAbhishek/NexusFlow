@@ -66,7 +66,10 @@ function Studio() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(restoredGraph?.edges ?? initialEdges);
   const [saved, setSaved] = useState(Boolean(restoredGraph));
   const [selected, setSelected] = useState("sensor");
-  const onConnect = useCallback((connection: Connection) => setEdges((eds) => addEdge({ ...connection, animated: true }, eds)), [setEdges]);
+  const onConnect = useCallback((connection: Connection) => {
+    setEdges((eds) => addEdge({ ...connection, animated: true }, eds));
+    setSaved(false);
+  }, [setEdges]);
   const counts = useMemo(() => ({ nodes: nodes.length, connections: edges.length }), [nodes.length, edges.length]);
 
   const addNode = (type: "sensor" | "filter" | "alert") => {
