@@ -1,19 +1,62 @@
 import { Router } from "express";
-import { z } from "zod";
 import { getTelemetryCollection } from "../db/mongo.js";
-import { batchSchema, telemetrySchema, toTelemetryDocument } from "../telemetry/schema.js";
+import { toTelemetryDocument } from "../telemetry/schema.js";
+import {
+  validateRecentTelemetryQuery,
+  validateSingleTelemetry,
+  validateTelemetryBatch
+} from "../telemetry/validator.js";
 
 export const telemetryRouter = Router();
 
+telemetryRouter.post("/validate", (req, res) => {
+  const isBatch =
+    typeof req.body === "object" &&
+    req.body !== null &&
+    "readings" in req.body;
+
+  if (isBatch) {
+    const validation = validateTelemetryBatch(req.body);
+    if (!validation.valid) {
+      res.status(400).json({ valid: false, error: validation.error, details: validation.details });
+      return;
+    }
+    res.json({
+      valid: true,
+      mode: "batch",
+      count: validation.data.readings.length,
+      warnings: validation.warnings
+    });
+    return;
+  }
+
+  const validation = validateSingleTelemetry(req.body);
+  if (!validation.valid) {
+    res.status(400).json({ valid: false, error: validation.error, details: validation.details });
+    return;
+  }
+
+  res.json({
+    valid: true,
+    mode: "single",
+    normalized: validation.data,
+    warnings: validation.warnings
+  });
+});
+
 telemetryRouter.post("/", async (req, res, next) => {
   try {
-    const parsed = telemetrySchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Invalid telemetry payload", details: parsed.error.flatten() });
+    const parsed = validateSingleTelemetry(req.body);
+    if (!parsed.valid) {
+      res.status(400).json({ error: parsed.error, details: parsed.details });
       return;
     }
     const result = await getTelemetryCollection().insertOne(toTelemetryDocument(parsed.data));
-    res.status(201).json({ insertedId: result.insertedId, accepted: 1 });
+    res.status(201).json({
+      insertedId: result.insertedId,
+      accepted: 1,
+      ...(parsed.warnings.length > 0 ? { warnings: parsed.warnings } : {})
+    });
   } catch (error) {
     next(error);
   }
@@ -21,14 +64,18 @@ telemetryRouter.post("/", async (req, res, next) => {
 
 telemetryRouter.post("/batch", async (req, res, next) => {
   try {
-    const parsed = batchSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Invalid batch payload", details: parsed.error.flatten() });
+    const parsed = validateTelemetryBatch(req.body);
+    if (!parsed.valid) {
+      res.status(400).json({ error: parsed.error, details: parsed.details });
       return;
     }
     const documents = parsed.data.readings.map(toTelemetryDocument);
     const result = await getTelemetryCollection().insertMany(documents, { ordered: false });
-    res.status(201).json({ accepted: result.insertedCount, insertedIds: result.insertedIds });
+    res.status(201).json({
+      accepted: result.insertedCount,
+      insertedIds: result.insertedIds,
+      ...(parsed.warnings.length > 0 ? { warnings: parsed.warnings } : {})
+    });
   } catch (error) {
     next(error);
   }
@@ -36,16 +83,17 @@ telemetryRouter.post("/batch", async (req, res, next) => {
 
 telemetryRouter.get("/recent", async (req, res, next) => {
   try {
-    const querySchema = z.object({
-      deviceId: z.string().trim().min(1).max(120).optional(),
-      limit: z.coerce.number().int().min(1).max(200).default(50)
-    });
-    const parsed = querySchema.safeParse(req.query);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Invalid query", details: parsed.error.flatten() });
+    const parsed = validateRecentTelemetryQuery(req.query);
+    if (!parsed.valid) {
+      res.status(400).json({ error: parsed.error, details: parsed.details });
       return;
     }
-    const filter = parsed.data.deviceId ? { "metadata.deviceId": parsed.data.deviceId } : {};
+
+    const filter: Record<string, string> = {};
+    if (parsed.data.deviceId) filter["metadata.deviceId"] = parsed.data.deviceId;
+    if (parsed.data.metric) filter["metadata.metric"] = parsed.data.metric;
+    if (parsed.data.location) filter["metadata.location"] = parsed.data.location;
+
     const readings = await getTelemetryCollection()
       .find(filter)
       .sort({ timestamp: -1 })
