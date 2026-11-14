@@ -12,6 +12,8 @@
     "dev:client": "npm --workspace client run dev",
     "build": "npm run build --workspace server && npm run build --workspace client",
     "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace client",
+    "test": "npm --workspace server run test",
+    "simulate": "npm --workspace server run simulate --",
     "install:all": "npm install"
   },
   "devDependencies": {
