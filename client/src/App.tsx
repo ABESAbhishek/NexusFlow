@@ -1,12 +1,23 @@
 import { useCallback, useMemo, useState } from "react";
 import {
-  Background, Controls, MiniMap, ReactFlow, ReactFlowProvider,
+  Background, Controls, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow,
   addEdge, useEdgesState, useNodesState, type Connection, type Node,
   type NodeTypes, Handle, Position
 } from "@xyflow/react";
 import { Activity, AlertTriangle, Cpu, Database, Gauge, Plus, Radio, Save, Workflow } from "lucide-react";
 
-type PipelineNodeData = { title: string; subtitle: string; accent: string };
+type PipelineNodeData = {
+  title: string;
+  subtitle: string;
+  accent: string;
+  sensorType?: string;
+  unit?: string;
+  operation?: string;
+  windowSize?: number;
+  alertType?: string;
+  threshold?: number;
+  message?: string;
+};
 
 function SensorNode({ data }: { data: PipelineNodeData }) {
   return <div className="pipeline-node sensor-node">
@@ -36,9 +47,43 @@ function AlertNode({ data }: { data: PipelineNodeData }) {
 
 const nodeTypes: NodeTypes = { sensor: SensorNode, filter: FilterNode, alert: AlertNode };
 const initialNodes: Node[] = [
-  { id: "sensor-1", type: "sensor", position: { x: 90, y: 150 }, data: { title: "Turbine Sensor", subtitle: "temperature · °C", accent: "cyan" } },
-  { id: "filter-1", type: "filter", position: { x: 390, y: 150 }, data: { title: "Moving Average", subtitle: "window · 5 samples", accent: "violet" } },
-  { id: "alert-1", type: "alert", position: { x: 700, y: 150 }, data: { title: "SMS Alert", subtitle: "threshold · 80 °C", accent: "orange" } }
+  {
+    id: "sensor-1",
+    type: "sensor",
+    position: { x: 90, y: 150 },
+    data: {
+      title: "Turbine Sensor",
+      subtitle: "temperature · °C",
+      accent: "cyan",
+      sensorType: "Temperature",
+      unit: "°C"
+    }
+  },
+  {
+    id: "filter-1",
+    type: "filter",
+    position: { x: 390, y: 150 },
+    data: {
+      title: "Moving Average",
+      subtitle: "window · 5 samples",
+      accent: "violet",
+      operation: "Moving Average",
+      windowSize: 5
+    }
+  },
+  {
+    id: "alert-1",
+    type: "alert",
+    position: { x: 700, y: 150 },
+    data: {
+      title: "SMS Alert",
+      subtitle: "threshold · 80 °C",
+      accent: "orange",
+      alertType: "SMS",
+      threshold: 80,
+      message: "Temperature threshold exceeded!"
+    }
+  }
 ];
 const initialEdges = [
   { id: "e-sensor-filter", source: "sensor-1", target: "filter-1", animated: true },
@@ -65,19 +110,149 @@ function Studio() {
   const [nodes, setNodes, onNodesChange] = useNodesState(restoredGraph?.nodes ?? initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(restoredGraph?.edges ?? initialEdges);
   const [saved, setSaved] = useState(Boolean(restoredGraph));
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const { screenToFlowPosition } = useReactFlow();
+
+  const onDragStart = (
+    event: React.DragEvent<HTMLButtonElement>,
+    nodeType: "sensor" | "filter" | "alert"
+  ) => {
+    event.dataTransfer.setData("application/reactflow", nodeType);
+    event.dataTransfer.effectAllowed = "move";
+  };
+
+  const onDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  };
+
+  const onDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+
+    const type = event.dataTransfer.getData("application/reactflow") as
+      | "sensor"
+      | "filter"
+      | "alert";
+
+    if (!["sensor", "filter", "alert"].includes(type)) return;
+
+    const config: Record<string, PipelineNodeData> = {
+      sensor: {
+        title: "New Sensor",
+        subtitle: "temperature · °C",
+        accent: "cyan",
+        sensorType: "Temperature",
+        unit: "°C"
+      },
+      filter: {
+        title: "Math Operation",
+        subtitle: "window · 5 samples",
+        accent: "violet",
+        operation: "Moving Average",
+        windowSize: 5
+      },
+      alert: {
+        title: "Action Trigger",
+        subtitle: "threshold · 80",
+        accent: "orange",
+        alertType: "SMS",
+        threshold: 80,
+        message: "Alert triggered!"
+      }
+    };
+
+    const position = screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY
+    });
+
+    setNodes((current) => [
+      ...current,
+      {
+        id: `${type}-${Date.now()}`,
+        type,
+        position,
+        data: config[type]
+      }
+    ]);
+
+    setSaved(false);
+  };
   const [selected, setSelected] = useState("sensor");
   const onConnect = useCallback((connection: Connection) => {
     setEdges((eds) => addEdge({ ...connection, animated: true }, eds));
     setSaved(false);
   }, [setEdges]);
   const counts = useMemo(() => ({ nodes: nodes.length, connections: edges.length }), [nodes.length, edges.length]);
+  const selectedNode = nodes.find((node) => node.id === selectedNodeId);
+
+
+  const updateSelectedNode = (
+    field: keyof PipelineNodeData,
+    value: string | number
+  ) => {
+    if (!selectedNodeId) return;
+
+    setNodes((current) =>
+      current.map((node) => {
+        if (node.id !== selectedNodeId) return node;
+
+        const updatedData = {
+          ...node.data,
+          [field]: value
+        } as PipelineNodeData;
+
+        if (node.type === "sensor") {
+          updatedData.subtitle =
+            `${updatedData.sensorType ?? "Temperature"} · ${updatedData.unit ?? "°C"}`;
+        }
+
+        if (node.type === "filter") {
+          updatedData.subtitle =
+            `${updatedData.operation ?? "Moving Average"} · ${updatedData.windowSize ?? 5} samples`;
+        }
+
+        if (node.type === "alert") {
+          updatedData.subtitle =
+            `threshold · ${updatedData.threshold ?? 80}`;
+        }
+
+        return {
+          ...node,
+          data: updatedData
+        };
+      })
+    );
+
+    setSaved(false);
+  };
+
 
   const addNode = (type: "sensor" | "filter" | "alert") => {
     const id = `${type}-${Date.now()}`;
     const config: Record<string, PipelineNodeData> = {
-      sensor: { title: "New Sensor", subtitle: "telemetry source", accent: "cyan" },
-      filter: { title: "Math Operation", subtitle: "configure expression", accent: "violet" },
-      alert: { title: "Action Trigger", subtitle: "configure action", accent: "orange" }
+      sensor: {
+        title: "New Sensor",
+        subtitle: "temperature · °C",
+        accent: "cyan",
+        sensorType: "Temperature",
+        unit: "°C"
+      },
+      filter: {
+        title: "Math Operation",
+        subtitle: "window · 5 samples",
+        accent: "violet",
+        operation: "Moving Average",
+        windowSize: 5
+      },
+      alert: {
+        title: "Action Trigger",
+        subtitle: "threshold · 80",
+        accent: "orange",
+        alertType: "SMS",
+        threshold: 80,
+        message: "Alert triggered!"
+      }
     };
     setNodes((current) => [...current, { id, type, position: { x: 160 + Math.random() * 260, y: 300 + Math.random() * 160 }, data: config[type] }]);
     setSaved(false);
@@ -107,9 +282,159 @@ function Studio() {
         <div className="sidebar-heading">PIPELINE BUILDER <span>01</span></div>
         <p className="sidebar-copy">Build a flow by adding nodes and connecting their ports.</p>
         <div className="palette-label">NODE LIBRARY</div>
-        <button className={selected === "sensor" ? "palette-item active" : "palette-item"} onClick={() => { setSelected("sensor"); addNode("sensor"); }}><span className="palette-icon cyan"><Radio size={17} /></span><span><b>Data source</b><small>Sensor telemetry input</small></span><Plus size={15} /></button>
-        <button className={selected === "filter" ? "palette-item active" : "palette-item"} onClick={() => { setSelected("filter"); addNode("filter"); }}><span className="palette-icon violet"><Gauge size={17} /></span><span><b>Math & filter</b><small>Transform measurements</small></span><Plus size={15} /></button>
-        <button className={selected === "alert" ? "palette-item active" : "palette-item"} onClick={() => { setSelected("alert"); addNode("alert"); }}><span className="palette-icon orange"><AlertTriangle size={17} /></span><span><b>Action trigger</b><small>Alerts and actions</small></span><Plus size={15} /></button>
+        <button
+          draggable
+          onDragStart={(event) => onDragStart(event, "sensor")}
+          className={selected === "sensor" ? "palette-item active" : "palette-item"}
+          onClick={() => { setSelected("sensor"); addNode("sensor"); }}
+        >
+          <span className="palette-icon cyan"><Radio size={17} /></span>
+          <span><b>Data source</b><small>Sensor telemetry input</small></span>
+          <Plus size={15} />
+        </button>
+        <button
+          draggable
+          onDragStart={(event) => onDragStart(event, "filter")}
+          className={selected === "filter" ? "palette-item active" : "palette-item"}
+          onClick={() => { setSelected("filter"); addNode("filter"); }}
+        >
+          <span className="palette-icon violet"><Gauge size={17} /></span>
+          <span><b>Math & filter</b><small>Transform measurements</small></span>
+          <Plus size={15} />
+        </button>
+        <button
+          draggable
+          onDragStart={(event) => onDragStart(event, "alert")}
+          className={selected === "alert" ? "palette-item active" : "palette-item"}
+          onClick={() => { setSelected("alert"); addNode("alert"); }}
+        >
+          <span className="palette-icon orange"><AlertTriangle size={17} /></span>
+          <span><b>Action trigger</b><small>Alerts and actions</small></span>
+          <Plus size={15} />
+        </button>
+        {selectedNode && (
+          <div className="node-config">
+            <div className="sidebar-divider" />
+            <div className="sidebar-heading">
+              NODE CONFIGURATION
+              <span>EDIT</span>
+            </div>
+
+            <p className="sidebar-copy">
+              Configure the selected {selectedNode.type} node.
+            </p>
+
+            <label className="config-label">Node name</label>
+            <input
+              className="config-input"
+              type="text"
+              value={String(selectedNode.data.title ?? "")}
+              onChange={(event) =>
+                updateSelectedNode("title", event.target.value)
+              }
+            />
+
+            {selectedNode.type === "sensor" && (
+              <>
+                <label className="config-label">Sensor type</label>
+                <select
+                  className="config-input"
+                  value={String(selectedNode.data.sensorType ?? "Temperature")}
+                  onChange={(event) =>
+                    updateSelectedNode("sensorType", event.target.value)
+                  }
+                >
+                  <option value="Temperature">Temperature</option>
+                  <option value="Humidity">Humidity</option>
+                  <option value="Pressure">Pressure</option>
+                </select>
+
+                <label className="config-label">Measurement unit</label>
+                <input
+                  className="config-input"
+                  type="text"
+                  value={String(selectedNode.data.unit ?? "")}
+                  onChange={(event) =>
+                    updateSelectedNode("unit", event.target.value)
+                  }
+                />
+              </>
+            )}
+
+            {selectedNode.type === "filter" && (
+              <>
+                <label className="config-label">Operation</label>
+                <select
+                  className="config-input"
+                  value={String(selectedNode.data.operation ?? "Moving Average")}
+                  onChange={(event) =>
+                    updateSelectedNode("operation", event.target.value)
+                  }
+                >
+                  <option value="Moving Average">Moving Average</option>
+                  <option value="Sum">Sum</option>
+                  <option value="Minimum">Minimum</option>
+                  <option value="Maximum">Maximum</option>
+                </select>
+
+                <label className="config-label">Window size</label>
+                <input
+                  className="config-input"
+                  type="number"
+                  min="1"
+                  value={Number(selectedNode.data.windowSize ?? 5)}
+                  onChange={(event) =>
+                    updateSelectedNode("windowSize", Number(event.target.value))
+                  }
+                />
+              </>
+            )}
+
+            {selectedNode.type === "alert" && (
+              <>
+                <label className="config-label">Alert type</label>
+                <select
+                  className="config-input"
+                  value={String(selectedNode.data.alertType ?? "SMS")}
+                  onChange={(event) =>
+                    updateSelectedNode("alertType", event.target.value)
+                  }
+                >
+                  <option value="SMS">SMS</option>
+                  <option value="Email">Email</option>
+                  <option value="Webhook">Webhook</option>
+                </select>
+
+                <label className="config-label">Threshold</label>
+                <input
+                  className="config-input"
+                  type="number"
+                  value={Number(selectedNode.data.threshold ?? 80)}
+                  onChange={(event) =>
+                    updateSelectedNode("threshold", Number(event.target.value))
+                  }
+                />
+
+                <label className="config-label">Alert message</label>
+                <input
+                  className="config-input"
+                  type="text"
+                  value={String(selectedNode.data.message ?? "")}
+                  onChange={(event) =>
+                    updateSelectedNode("message", event.target.value)
+                  }
+                />
+              </>
+            )}
+
+            <button
+              className="reset-button config-close"
+              onClick={() => setSelectedNodeId(null)}
+            >
+              Close configuration
+            </button>
+          </div>
+        )}
         <div className="sidebar-divider" />
         <div className="sidebar-heading">WORKSPACE STATUS</div>
         <div className="status-card"><div><span>Canvas nodes</span><b>{counts.nodes.toString().padStart(2, "0")}</b></div><div><span>Connections</span><b>{counts.connections.toString().padStart(2, "0")}</b></div><div><span>Database</span><b className="offline">Not connected</b></div></div>
@@ -117,8 +442,15 @@ function Studio() {
       </aside>
       <section className="canvas-section">
         <div className="canvas-toolbar"><div><span className="eyebrow">VISUAL WORKFLOW</span><h1>Pipeline canvas</h1></div><div className="canvas-meta"><span><i className="legend-dot cyan-dot" /> SOURCE</span><span><i className="legend-dot violet-dot" /> PROCESS</span><span><i className="legend-dot orange-dot" /> ACTION</span></div></div>
-        <div className="flow-wrap">
-          <ReactFlow nodes={nodes} edges={edges} deleteKeyCode={["Backspace", "Delete"]} onNodesChange={(changes) => { onNodesChange(changes); setSaved(false); }} onEdgesChange={(changes) => { onEdgesChange(changes); setSaved(false); }} onConnect={onConnect} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.25 }} minZoom={0.25} maxZoom={1.5} proOptions={{ hideAttribution: true }}>
+        <div
+          className="flow-wrap"
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+        >
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodeClick={(_, node) => setSelectedNodeId(node.id)} deleteKeyCode={["Backspace", "Delete"]} onNodesChange={(changes) => { onNodesChange(changes); setSaved(false); }} onEdgesChange={(changes) => { onEdgesChange(changes); setSaved(false); }} onConnect={onConnect} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.25 }} minZoom={0.25} maxZoom={1.5} proOptions={{ hideAttribution: true }}>
             <Background color="#253244" gap={22} size={1} />
             <Controls />
             <MiniMap nodeColor={(node) => node.type === "sensor" ? "#36c9e8" : node.type === "filter" ? "#9a82f5" : "#f5a45b"} maskColor="rgba(5, 10, 18, 0.72)" />
