@@ -5,6 +5,15 @@ import {
   type NodeTypes, Handle, Position
 } from "@xyflow/react";
 import { Activity, AlertTriangle, Cpu, Database, Gauge, Plus, Radio, Save, Workflow } from "lucide-react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from "recharts";
 
 type PipelineNodeData = {
   title: string;
@@ -46,6 +55,56 @@ function AlertNode({ data }: { data: PipelineNodeData }) {
 }
 
 const nodeTypes: NodeTypes = { sensor: SensorNode, filter: FilterNode, alert: AlertNode };
+const telemetryData = [
+  { time: "10:00", temperature: 28 },
+  { time: "10:05", temperature: 32 },
+  { time: "10:10", temperature: 30 },
+  { time: "10:15", temperature: 36 },
+  { time: "10:20", temperature: 34 },
+  { time: "10:25", temperature: 42 },
+  { time: "10:30", temperature: 39 },
+  { time: "10:35", temperature: 45 }
+];
+
+function TelemetryChart() {
+  return (
+    <div className="telemetry-panel">
+      <div className="telemetry-heading">
+        <div>
+          <span className="eyebrow">SENSOR ANALYTICS</span>
+          <h2>Temperature telemetry</h2>
+        </div>
+        <span className="telemetry-unit">°C · SIMULATED DATA</span>
+      </div>
+
+      <div className="telemetry-chart">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={telemetryData}>
+            <CartesianGrid stroke="#253244" strokeDasharray="3 3" />
+            <XAxis dataKey="time" stroke="#8293a7" />
+            <YAxis stroke="#8293a7" />
+            <Tooltip
+              contentStyle={{
+                background: "#101b29",
+                border: "1px solid #34465c",
+                borderRadius: "8px",
+                color: "#e8eef7"
+              }}
+            />
+            <Line
+              type="monotone"
+              dataKey="temperature"
+              stroke="#42c9e3"
+              strokeWidth={2}
+              dot={{ r: 3, fill: "#42c9e3" }}
+              activeDot={{ r: 6 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
 const initialNodes: Node[] = [
   {
     id: "sensor-1",
@@ -457,10 +516,12 @@ function Studio() {
           </ReactFlow>
           <div className="canvas-hint"><Activity size={14} /> Drag nodes to arrange · Connect ports to create a flow</div>
         </div>
+
+        <TelemetryChart />
         <footer className="canvas-footer"><span><Cpu size={14} /> NEXUSFLOW GRAPH EDITOR</span><span>{counts.nodes} NODES <b>·</b> {counts.connections} EDGES <b>·</b> LOCAL DRAFT</span></footer>
       </section>
     </main>
-  </div>;
+  </div >;
 }
 
 export default function App() {
