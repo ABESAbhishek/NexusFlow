@@ -77,6 +77,30 @@ function TelemetryChart() {
         <span className="telemetry-unit">°C · SIMULATED DATA</span>
       </div>
 
+      <div className="telemetry-stats">
+        <div className="telemetry-stat">
+          <span>Current</span>
+          <strong>{telemetryData[telemetryData.length - 1].temperature}°C</strong>
+        </div>
+
+        <div className="telemetry-stat">
+          <span>Average</span>
+          <strong>
+            {(telemetryData.reduce((sum, item) => sum + item.temperature, 0) / telemetryData.length).toFixed(1)}°C
+          </strong>
+        </div>
+
+        <div className="telemetry-stat">
+          <span>Maximum</span>
+          <strong>{Math.max(...telemetryData.map((item) => item.temperature))}°C</strong>
+        </div>
+
+        <div className="telemetry-stat">
+          <span>Minimum</span>
+          <strong>{Math.min(...telemetryData.map((item) => item.temperature))}°C</strong>
+        </div>
+      </div>
+
       <div className="telemetry-chart">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={telemetryData}>
@@ -152,17 +176,60 @@ const initialEdges = [
 const GRAPH_STORAGE_KEY = "nexusflow-week1-graph";
 type SavedGraph = { nodes: Node[]; edges: typeof initialEdges; savedAt?: string };
 
+
 function readSavedGraph(): SavedGraph | null {
   try {
     const raw = localStorage.getItem(GRAPH_STORAGE_KEY);
+
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as SavedGraph;
-    if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return null;
-    return parsed;
+
+    const parsed: unknown = JSON.parse(raw);
+
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !("nodes" in parsed) ||
+      !("edges" in parsed) ||
+      !Array.isArray(parsed.nodes) ||
+      !Array.isArray(parsed.edges)
+    ) {
+      return null;
+    }
+
+    const validNodes = parsed.nodes.every(
+      (node) =>
+        typeof node === "object" &&
+        node !== null &&
+        "id" in node &&
+        typeof node.id === "string" &&
+        "position" in node &&
+        typeof node.position === "object" &&
+        node.position !== null &&
+        "data" in node &&
+        typeof node.data === "object" &&
+        node.data !== null
+    );
+
+    const validEdges = parsed.edges.every(
+      (edge) =>
+        typeof edge === "object" &&
+        edge !== null &&
+        "id" in edge &&
+        typeof edge.id === "string" &&
+        "source" in edge &&
+        typeof edge.source === "string" &&
+        "target" in edge &&
+        typeof edge.target === "string"
+    );
+
+    if (!validNodes || !validEdges) return null;
+
+    return parsed as SavedGraph;
   } catch {
     return null;
   }
 }
+
 
 function Studio() {
   const restoredGraph = useMemo(() => readSavedGraph(), []);
@@ -317,11 +384,28 @@ function Studio() {
     setSaved(false);
   };
 
+
   const saveGraph = () => {
-    const graph = { nodes, edges, savedAt: new Date().toISOString() };
-    localStorage.setItem(GRAPH_STORAGE_KEY, JSON.stringify(graph));
-    setSaved(true);
+    try {
+      const graph = {
+        nodes,
+        edges,
+        savedAt: new Date().toISOString()
+      };
+
+      localStorage.setItem(
+        GRAPH_STORAGE_KEY,
+        JSON.stringify(graph)
+      );
+
+      setSaved(true);
+    } catch (error) {
+      console.error("Failed to save NexusFlow graph:", error);
+      setSaved(false);
+      window.alert("Unable to save graph. Please check browser storage.");
+    }
   };
+
 
   const resetGraph = () => {
     setNodes(initialNodes);

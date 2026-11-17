@@ -676,3 +676,38 @@ body {
     width: 100%;
     height: 220px;
 }
+
+.telemetry-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.telemetry-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 13px 15px;
+    background: #0d1925;
+    border: 1px solid #223447;
+    border-radius: 8px;
+}
+
+.telemetry-stat span {
+    color: #8293a7;
+    font-size: 10px;
+    letter-spacing: 0.7px;
+}
+
+.telemetry-stat strong {
+    color: #4bd2e9;
+    font-size: 21px;
+    font-weight: 700;
+}
+
+@media (max-width: 760px) {
+    .telemetry-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
