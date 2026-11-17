@@ -1,6 +1,9 @@
 import { Router } from "express";
+import { z } from "zod";
 import { getTelemetryCollection } from "../db/mongo.js";
-import { toTelemetryDocument } from "../telemetry/schema.js";
+import { runStreamThroughputBenchmark } from "../streams/benchmark.js";
+import { executeTelemetryStreamPipeline } from "../streams/operators.js";
+import { telemetrySchema, toTelemetryDocument } from "../telemetry/schema.js";
 import {
   validateRecentTelemetryQuery,
   validateSingleTelemetry,
@@ -8,6 +11,48 @@ import {
 } from "../telemetry/validator.js";
 
 export const telemetryRouter = Router();
+
+const evaluatePipelineSchema = z.object({
+  readings: z.array(telemetrySchema).min(1).max(1000),
+  deviceIdFilter: z.string().trim().min(1).max(120).optional(),
+  metricFilter: z.string().trim().min(1).max(80).optional(),
+  movingAverageWindow: z.number().int().min(1).max(1000).optional(),
+  mathTransforms: z
+    .array(
+      z.object({
+        operation: z.enum([
+          "scale",
+          "offset",
+          "clamp",
+          "celsius_to_fahrenheit",
+          "fahrenheit_to_celsius",
+          "bar_to_psi",
+          "psi_to_bar",
+          "abs",
+          "round"
+        ]),
+        factor: z.number().finite().optional(),
+        offset: z.number().finite().optional(),
+        min: z.number().finite().optional(),
+        max: z.number().finite().optional(),
+        decimals: z.number().int().min(0).max(8).optional()
+      })
+    )
+    .optional(),
+  thresholdRules: z
+    .array(
+      z.object({
+        ruleId: z.string().trim().min(1).max(120),
+        metric: z.string().trim().min(1).max(80).optional(),
+        deviceId: z.string().trim().min(1).max(120).optional(),
+        comparator: z.enum(["gt", "gte", "lt", "lte", "eq", "between", "outside"]),
+        threshold: z.number().finite(),
+        upperThreshold: z.number().finite().optional(),
+        severity: z.enum(["info", "warning", "critical"]).optional()
+      })
+    )
+    .optional()
+});
 
 telemetryRouter.post("/validate", (req, res) => {
   const isBatch =
@@ -103,4 +148,54 @@ telemetryRouter.get("/recent", async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+telemetryRouter.post("/evaluate", (req, res) => {
+  const parsed = evaluatePipelineSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: "Invalid stream evaluation payload",
+      details: parsed.error.flatten()
+    });
+    return;
+  }
+
+  const result = executeTelemetryStreamPipeline(parsed.data.readings, {
+    ...(parsed.data.deviceIdFilter ? { deviceIdFilter: parsed.data.deviceIdFilter } : {}),
+    ...(parsed.data.metricFilter ? { metricFilter: parsed.data.metricFilter } : {}),
+    ...(parsed.data.movingAverageWindow !== undefined
+      ? { movingAverageWindow: parsed.data.movingAverageWindow }
+      : {}),
+    ...(parsed.data.mathTransforms ? { mathTransforms: parsed.data.mathTransforms } : {}),
+    ...(parsed.data.thresholdRules ? { thresholdRules: parsed.data.thresholdRules } : {})
+  });
+
+  res.json({
+    inputCount: parsed.data.readings.length,
+    outputCount: result.readings.length,
+    alertCount: result.alerts.length,
+    readings: result.readings,
+    alerts: result.alerts
+  });
+});
+
+telemetryRouter.post("/benchmark", (req, res) => {
+  const optionsSchema = z
+    .object({
+      totalReadings: z.number().int().min(100).max(50000).optional(),
+      batchSize: z.number().int().min(10).max(1000).optional()
+    })
+    .optional();
+
+  const parsed = optionsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: "Invalid benchmark options",
+      details: parsed.error.flatten()
+    });
+    return;
+  }
+
+  const report = runStreamThroughputBenchmark(parsed.data ?? {});
+  res.json(report);
 });
