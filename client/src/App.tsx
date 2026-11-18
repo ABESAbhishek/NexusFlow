@@ -196,19 +196,35 @@ function readSavedGraph(): SavedGraph | null {
       return null;
     }
 
-    const validNodes = parsed.nodes.every(
-      (node) =>
-        typeof node === "object" &&
-        node !== null &&
-        "id" in node &&
-        typeof node.id === "string" &&
-        "position" in node &&
-        typeof node.position === "object" &&
-        node.position !== null &&
-        "data" in node &&
-        typeof node.data === "object" &&
-        node.data !== null
-    );
+    const nodeIds = new Set<string>();
+
+    const validNodes = parsed.nodes.every((node) => {
+      if (
+        typeof node !== "object" ||
+        node === null ||
+        !("id" in node) ||
+        typeof node.id !== "string" ||
+        !node.id.trim() ||
+        nodeIds.has(node.id) ||
+        !("position" in node) ||
+        typeof node.position !== "object" ||
+        node.position === null ||
+        !("x" in node.position) ||
+        typeof node.position.x !== "number" ||
+        !Number.isFinite(node.position.x) ||
+        !("y" in node.position) ||
+        typeof node.position.y !== "number" ||
+        !Number.isFinite(node.position.y) ||
+        !("data" in node) ||
+        typeof node.data !== "object" ||
+        node.data === null
+      ) {
+        return false;
+      }
+
+      nodeIds.add(node.id);
+      return true;
+    });
 
     const validEdges = parsed.edges.every(
       (edge) =>
@@ -218,8 +234,10 @@ function readSavedGraph(): SavedGraph | null {
         typeof edge.id === "string" &&
         "source" in edge &&
         typeof edge.source === "string" &&
+        nodeIds.has(edge.source) &&
         "target" in edge &&
-        typeof edge.target === "string"
+        typeof edge.target === "string" &&
+        nodeIds.has(edge.target)
     );
 
     if (!validNodes || !validEdges) return null;
