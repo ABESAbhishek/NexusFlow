@@ -66,7 +66,43 @@ const telemetryData = [
   { time: "10:35", temperature: 45 }
 ];
 
-function TelemetryChart() {
+function calculateMathResult(
+  operation: string | undefined,
+  windowSize: number | undefined
+): number {
+  const size = Math.min(
+    Math.max(Math.floor(windowSize ?? 5), 1),
+    telemetryData.length
+  );
+
+  const readings = telemetryData
+    .slice(-size)
+    .map((item) => item.temperature);
+
+  switch (operation) {
+    case "Sum":
+      return readings.reduce((total, value) => total + value, 0);
+
+    case "Minimum":
+      return Math.min(...readings);
+
+    case "Maximum":
+      return Math.max(...readings);
+
+    case "Moving Average":
+    default:
+      return readings.reduce((total, value) => total + value, 0) / readings.length;
+  }
+}
+function TelemetryChart({
+  operation,
+  windowSize
+}: {
+  operation?: string;
+  windowSize?: number;
+}) {
+  const mathResult = calculateMathResult(operation, windowSize);
+
   return (
     <div className="telemetry-panel">
       <div className="telemetry-heading">
@@ -84,10 +120,8 @@ function TelemetryChart() {
         </div>
 
         <div className="telemetry-stat">
-          <span>Average</span>
-          <strong>
-            {(telemetryData.reduce((sum, item) => sum + item.temperature, 0) / telemetryData.length).toFixed(1)}°C
-          </strong>
+          <span>{operation ?? "Moving Average"}</span>
+          <strong>{mathResult.toFixed(2)}°C</strong>
         </div>
 
         <div className="telemetry-stat">
@@ -329,6 +363,19 @@ function Studio() {
   }, [setEdges]);
   const counts = useMemo(() => ({ nodes: nodes.length, connections: edges.length }), [nodes.length, edges.length]);
   const selectedNode = nodes.find((node) => node.id === selectedNodeId);
+
+  const activeMathNode =
+    selectedNode?.type === "filter"
+      ? selectedNode
+      : nodes.find((node) => node.type === "filter");
+
+  const mathOperation = String(
+    activeMathNode?.data.operation ?? "Moving Average"
+  );
+
+  const mathWindowSize = Number(
+    activeMathNode?.data.windowSize ?? 5
+  );
 
 
   const updateSelectedNode = (
@@ -619,7 +666,10 @@ function Studio() {
           <div className="canvas-hint"><Activity size={14} /> Drag nodes to arrange · Connect ports to create a flow</div>
         </div>
 
-        <TelemetryChart />
+        <TelemetryChart
+          operation={mathOperation}
+          windowSize={mathWindowSize}
+        />
         <footer className="canvas-footer"><span><Cpu size={14} /> NEXUSFLOW GRAPH EDITOR</span><span>{counts.nodes} NODES <b>·</b> {counts.connections} EDGES <b>·</b> LOCAL DRAFT</span></footer>
       </section>
     </main>
