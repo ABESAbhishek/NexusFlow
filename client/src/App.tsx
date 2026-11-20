@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Background, Controls, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow,
   addEdge, useEdgesState, useNodesState, type Connection, type Node,
@@ -289,6 +289,12 @@ function Studio() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(restoredGraph?.edges ?? initialEdges);
   const [saved, setSaved] = useState(Boolean(restoredGraph));
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [actionResult, setActionResult] = useState<{
+    status: "triggered" | "waiting";
+    message: string;
+    value: number;
+    actionType: string;
+  } | null>(null);
   const { screenToFlowPosition } = useReactFlow();
 
   const onDragStart = (
@@ -376,6 +382,27 @@ function Studio() {
   const mathWindowSize = Number(
     activeMathNode?.data.windowSize ?? 5
   );
+
+  useEffect(() => {
+    const alertNode = nodes.find((node) => node.type === "alert");
+
+    if (!alertNode) {
+      setActionResult(null);
+      return;
+    }
+
+    const value = calculateMathResult(mathOperation, mathWindowSize);
+    const threshold = Number(alertNode.data.threshold ?? 80);
+
+    setActionResult({
+      status: value >= threshold ? "triggered" : "waiting",
+      message: String(
+        alertNode.data.message ?? "Temperature threshold exceeded!"
+      ),
+      value,
+      actionType: String(alertNode.data.alertType ?? "SMS"),
+    });
+  }, [nodes, mathOperation, mathWindowSize]);
 
 
   const updateSelectedNode = (
@@ -670,6 +697,47 @@ function Studio() {
           operation={mathOperation}
           windowSize={mathWindowSize}
         />
+        <div className="telemetry-panel">
+          <div className="telemetry-heading">
+            <div>
+              <span className="eyebrow">ACTION TRIGGER</span>
+              <h2>Execution status</h2>
+            </div>
+
+            <span>
+              {actionResult?.status === "triggered" ? "TRIGGERED" : "WAITING"}
+            </span>
+          </div>
+
+          {actionResult && (
+            <div className="telemetry-stats">
+              <div className="telemetry-stat">
+                <span>Calculated value</span>
+                <strong>{actionResult.value.toFixed(2)}</strong>
+              </div>
+
+              <div className="telemetry-stat">
+                <span>Configured action</span>
+                <strong>{actionResult.actionType}</strong>
+              </div>
+
+              <div className="telemetry-stat">
+                <span>Threshold</span>
+                <strong>
+                  {String(
+                    nodes.find((node) => node.type === "alert")?.data.threshold ?? 80
+                  )}
+                </strong>
+              </div>
+            </div>
+          )}
+
+          <p className="sidebar-copy">
+            {actionResult?.status === "triggered"
+              ? actionResult.message
+              : "Waiting for the calculated value to reach the configured threshold."}
+          </p>
+        </div>
         <footer className="canvas-footer"><span><Cpu size={14} /> NEXUSFLOW GRAPH EDITOR</span><span>{counts.nodes} NODES <b>·</b> {counts.connections} EDGES <b>·</b> LOCAL DRAFT</span></footer>
       </section>
     </main>
