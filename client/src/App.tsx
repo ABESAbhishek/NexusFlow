@@ -94,6 +94,58 @@ function calculateMathResult(
       return readings.reduce((total, value) => total + value, 0) / readings.length;
   }
 }
+
+type ConnectedWorkflow = {
+  sensorNode: Node;
+  mathNode: Node;
+  alertNode: Node;
+};
+
+function findConnectedWorkflow(
+  nodes: Node[],
+  edges: { source: string; target: string }[]
+): ConnectedWorkflow | null {
+  const sensorNodes = nodes.filter((node) => node.type === "sensor");
+
+  for (const sensorNode of sensorNodes) {
+    const sensorToMath = edges.find(
+      (edge) =>
+        edge.source === sensorNode.id &&
+        nodes.some(
+          (node) => node.id === edge.target && node.type === "filter"
+        )
+    );
+
+    if (!sensorToMath) continue;
+
+    const mathNode = nodes.find(
+      (node) => node.id === sensorToMath.target
+    );
+
+    if (!mathNode) continue;
+
+    const mathToAlert = edges.find(
+      (edge) =>
+        edge.source === mathNode.id &&
+        nodes.some(
+          (node) => node.id === edge.target && node.type === "alert"
+        )
+    );
+
+    if (!mathToAlert) continue;
+
+    const alertNode = nodes.find(
+      (node) => node.id === mathToAlert.target
+    );
+
+    if (!alertNode) continue;
+
+    return { sensorNode, mathNode, alertNode };
+  }
+
+  return null;
+}
+
 function TelemetryChart({
   operation,
   windowSize
@@ -384,25 +436,33 @@ function Studio() {
   );
 
   useEffect(() => {
-    const alertNode = nodes.find((node) => node.type === "alert");
+    const workflow = findConnectedWorkflow(nodes, edges);
 
-    if (!alertNode) {
+    if (!workflow) {
       setActionResult(null);
       return;
     }
 
-    const value = calculateMathResult(mathOperation, mathWindowSize);
-    const threshold = Number(alertNode.data.threshold ?? 80);
+    const operation = String(
+      workflow.mathNode.data.operation ?? "Moving Average"
+    );
+
+    const windowSize = Number(
+      workflow.mathNode.data.windowSize ?? 5
+    );
+
+    const value = calculateMathResult(operation, windowSize);
+    const threshold = Number(workflow.alertNode.data.threshold ?? 80);
 
     setActionResult({
       status: value >= threshold ? "triggered" : "waiting",
       message: String(
-        alertNode.data.message ?? "Temperature threshold exceeded!"
+        workflow.alertNode.data.message ?? "Temperature threshold exceeded!"
       ),
       value,
-      actionType: String(alertNode.data.alertType ?? "SMS"),
+      actionType: String(workflow.alertNode.data.alertType ?? "SMS"),
     });
-  }, [nodes, mathOperation, mathWindowSize]);
+  }, [nodes, edges]);
 
 
   const updateSelectedNode = (
