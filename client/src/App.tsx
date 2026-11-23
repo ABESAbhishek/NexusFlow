@@ -101,24 +101,51 @@ type ConnectedWorkflow = {
   alertNode: Node;
 };
 
+
+type WorkflowValidation = {
+  workflow: ConnectedWorkflow | null;
+  message: string;
+};
+
 function findConnectedWorkflow(
   nodes: Node[],
   edges: { source: string; target: string }[]
-): ConnectedWorkflow | null {
+): WorkflowValidation {
   const sensorNodes = nodes.filter((node) => node.type === "sensor");
+  const mathNodes = nodes.filter((node) => node.type === "filter");
+  const alertNodes = nodes.filter((node) => node.type === "alert");
+
+  if (sensorNodes.length === 0) {
+    return {
+      workflow: null,
+      message: "Add a Data Source node to begin."
+    };
+  }
+
+  if (mathNodes.length === 0) {
+    return {
+      workflow: null,
+      message: "Add a Math Operation node to process telemetry."
+    };
+  }
+
+  if (alertNodes.length === 0) {
+    return {
+      workflow: null,
+      message: "Add an Action Trigger node to complete the workflow."
+    };
+  }
 
   for (const sensorNode of sensorNodes) {
     const sensorToMath = edges.find(
       (edge) =>
         edge.source === sensorNode.id &&
-        nodes.some(
-          (node) => node.id === edge.target && node.type === "filter"
-        )
+        mathNodes.some((node) => node.id === edge.target)
     );
 
     if (!sensorToMath) continue;
 
-    const mathNode = nodes.find(
+    const mathNode = mathNodes.find(
       (node) => node.id === sensorToMath.target
     );
 
@@ -127,24 +154,42 @@ function findConnectedWorkflow(
     const mathToAlert = edges.find(
       (edge) =>
         edge.source === mathNode.id &&
-        nodes.some(
-          (node) => node.id === edge.target && node.type === "alert"
-        )
+        alertNodes.some((node) => node.id === edge.target)
     );
 
     if (!mathToAlert) continue;
 
-    const alertNode = nodes.find(
+    const alertNode = alertNodes.find(
       (node) => node.id === mathToAlert.target
     );
 
     if (!alertNode) continue;
 
-    return { sensorNode, mathNode, alertNode };
+    return {
+      workflow: { sensorNode, mathNode, alertNode },
+      message: "Workflow is connected and ready for evaluation."
+    };
   }
 
-  return null;
+  const hasSensorToMathConnection = edges.some(
+    (edge) =>
+      sensorNodes.some((node) => node.id === edge.source) &&
+      mathNodes.some((node) => node.id === edge.target)
+  );
+
+  if (!hasSensorToMathConnection) {
+    return {
+      workflow: null,
+      message: "Connect the Data Source node to the Math Operation node."
+    };
+  }
+
+  return {
+    workflow: null,
+    message: "Connect the Math Operation node to the Action Trigger node."
+  };
 }
+
 
 function TelemetryChart({
   operation,
@@ -347,6 +392,9 @@ function Studio() {
     value: number;
     actionType: string;
   } | null>(null);
+  const [workflowMessage, setWorkflowMessage] = useState(
+    "Waiting for workflow validation."
+  );
   const { screenToFlowPosition } = useReactFlow();
 
   const onDragStart = (
@@ -436,7 +484,11 @@ function Studio() {
   );
 
   useEffect(() => {
-    const workflow = findConnectedWorkflow(nodes, edges);
+    const validation = findConnectedWorkflow(nodes, edges);
+
+    setWorkflowMessage(validation.message);
+
+    const workflow = validation.workflow;
 
     if (!workflow) {
       setActionResult(null);
@@ -463,7 +515,6 @@ function Studio() {
       actionType: String(workflow.alertNode.data.alertType ?? "SMS"),
     });
   }, [nodes, edges]);
-
 
   const updateSelectedNode = (
     field: keyof PipelineNodeData,
@@ -765,7 +816,11 @@ function Studio() {
             </div>
 
             <span>
-              {actionResult?.status === "triggered" ? "TRIGGERED" : "WAITING"}
+              {!actionResult
+                ? "INCOMPLETE"
+                : actionResult.status === "triggered"
+                  ? "TRIGGERED"
+                  : "WAITING"}
             </span>
           </div>
 
@@ -795,7 +850,9 @@ function Studio() {
           <p className="sidebar-copy">
             {actionResult?.status === "triggered"
               ? actionResult.message
-              : "Waiting for the calculated value to reach the configured threshold."}
+              : actionResult
+                ? "Workflow is connected. Waiting for the calculated value to reach the configured threshold."
+                : workflowMessage}
           </p>
         </div>
         <footer className="canvas-footer"><span><Cpu size={14} /> NEXUSFLOW GRAPH EDITOR</span><span>{counts.nodes} NODES <b>·</b> {counts.connections} EDGES <b>·</b> LOCAL DRAFT</span></footer>
