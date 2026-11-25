@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { globalTelemetryBroadcaster } from "../streams/broadcaster.js";
+import { handleTelemetrySseStream } from "../streams/sse.js";
 import { globalWebhookDispatcher } from "../streams/webhook.js";
 import { databaseIsReady, getTelemetryCollection } from "../db/mongo.js";
 import { runStreamThroughputBenchmark } from "../streams/benchmark.js";
@@ -13,6 +14,9 @@ import {
 } from "../telemetry/validator.js";
 
 export const telemetryRouter = Router();
+
+// Live Real-Time Stream for Dashboard (Server-Sent Events)
+telemetryRouter.get("/stream", handleTelemetrySseStream);
 
 const evaluatePipelineSchema = z.object({
   readings: z.array(telemetrySchema).min(1).max(1000),
