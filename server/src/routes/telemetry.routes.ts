@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
-import { getTelemetryCollection } from "../db/mongo.js";
+import { globalTelemetryBroadcaster } from "../streams/broadcaster.js";
+import { globalWebhookDispatcher } from "../streams/webhook.js";
+import { databaseIsReady, getTelemetryCollection } from "../db/mongo.js";
 import { runStreamThroughputBenchmark } from "../streams/benchmark.js";
 import { executeTelemetryStreamPipeline } from "../streams/operators.js";
 import { telemetrySchema, toTelemetryDocument } from "../telemetry/schema.js";
@@ -96,10 +98,24 @@ telemetryRouter.post("/", async (req, res, next) => {
       res.status(400).json({ error: parsed.error, details: parsed.details });
       return;
     }
-    const result = await getTelemetryCollection().insertOne(toTelemetryDocument(parsed.data));
+
+    // Real-time distribution to active subscribers
+    globalTelemetryBroadcaster.broadcastTelemetry({
+      ...parsed.data,
+      rawValue: parsed.data.value
+    });
+
+    const isDbConnected = await databaseIsReady();
+    let insertedId: unknown = "ephemeral-stream-mode";
+    if (isDbConnected) {
+      const result = await getTelemetryCollection().insertOne(toTelemetryDocument(parsed.data));
+      insertedId = result.insertedId;
+    }
+
     res.status(201).json({
-      insertedId: result.insertedId,
+      insertedId,
       accepted: 1,
+      persisted: isDbConnected,
       ...(parsed.warnings.length > 0 ? { warnings: parsed.warnings } : {})
     });
   } catch (error) {
@@ -114,11 +130,30 @@ telemetryRouter.post("/batch", async (req, res, next) => {
       res.status(400).json({ error: parsed.error, details: parsed.details });
       return;
     }
-    const documents = parsed.data.readings.map(toTelemetryDocument);
-    const result = await getTelemetryCollection().insertMany(documents, { ordered: false });
+
+    // Distribute all batch readings through real-time broadcaster
+    for (const reading of parsed.data.readings) {
+      globalTelemetryBroadcaster.broadcastTelemetry({
+        ...reading,
+        rawValue: reading.value
+      });
+    }
+
+    const isDbConnected = await databaseIsReady();
+    let insertedCount = parsed.data.readings.length;
+    let insertedIds: unknown = undefined;
+
+    if (isDbConnected) {
+      const documents = parsed.data.readings.map(toTelemetryDocument);
+      const result = await getTelemetryCollection().insertMany(documents, { ordered: false });
+      insertedCount = result.insertedCount;
+      insertedIds = result.insertedIds;
+    }
+
     res.status(201).json({
-      accepted: result.insertedCount,
-      insertedIds: result.insertedIds,
+      accepted: insertedCount,
+      persisted: isDbConnected,
+      ...(insertedIds ? { insertedIds } : {}),
       ...(parsed.warnings.length > 0 ? { warnings: parsed.warnings } : {})
     });
   } catch (error) {
@@ -134,6 +169,17 @@ telemetryRouter.get("/recent", async (req, res, next) => {
       return;
     }
 
+    const isDbConnected = await databaseIsReady();
+    if (!isDbConnected) {
+      // Fallback to recent in-memory broadcaster buffer when running without live Mongo
+      const memoryPackets = globalTelemetryBroadcaster.getHistory(parsed.data.limit);
+      const memoryReadings = memoryPackets
+        .filter((p) => p.type === "telemetry")
+        .map((p) => p.payload);
+      res.json({ readings: memoryReadings, count: memoryReadings.length, source: "memory_buffer" });
+      return;
+    }
+
     const filter: Record<string, string> = {};
     if (parsed.data.deviceId) filter["metadata.deviceId"] = parsed.data.deviceId;
     if (parsed.data.metric) filter["metadata.metric"] = parsed.data.metric;
@@ -144,13 +190,13 @@ telemetryRouter.get("/recent", async (req, res, next) => {
       .sort({ timestamp: -1 })
       .limit(parsed.data.limit)
       .toArray();
-    res.json({ readings, count: readings.length });
+    res.json({ readings, count: readings.length, source: "mongodb" });
   } catch (error) {
     next(error);
   }
 });
 
-telemetryRouter.post("/evaluate", (req, res) => {
+telemetryRouter.post("/evaluate", async (req, res) => {
   const parsed = evaluatePipelineSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
@@ -169,6 +215,12 @@ telemetryRouter.post("/evaluate", (req, res) => {
     ...(parsed.data.mathTransforms ? { mathTransforms: parsed.data.mathTransforms } : {}),
     ...(parsed.data.thresholdRules ? { thresholdRules: parsed.data.thresholdRules } : {})
   });
+
+  // Automatically broadcast any alerts triggered by visual rules and forward to external webhooks
+  for (const alert of result.alerts) {
+    globalTelemetryBroadcaster.broadcastAlert(alert);
+    void globalWebhookDispatcher.dispatchAlert(alert);
+  }
 
   res.json({
     inputCount: parsed.data.readings.length,
