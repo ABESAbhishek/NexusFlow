@@ -300,7 +300,9 @@ export class TelemetryWebSocketServer extends EventEmitter {
     const payload = buffer.subarray(offset, offset + payloadLength);
     if (isMasked && mask) {
       for (let i = 0; i < payload.length; i++) {
-        payload[i] ^= mask[i % 4]!;
+        const currentByte = payload[i] ?? 0;
+        const maskByte = mask[i % 4] ?? 0;
+        payload[i] = currentByte ^ maskByte;
       }
     }
 
